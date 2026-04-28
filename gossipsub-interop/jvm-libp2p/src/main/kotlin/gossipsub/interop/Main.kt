@@ -6,6 +6,7 @@ import io.libp2p.protocol.Identify
 import io.libp2p.pubsub.NOP_ROUTER_VALIDATOR
 import io.libp2p.pubsub.PubsubProtocol
 import io.libp2p.pubsub.gossip.Gossip
+import io.libp2p.pubsub.gossip.GossipExtension
 import io.libp2p.pubsub.gossip.GossipParams
 import io.libp2p.pubsub.gossip.builders.GossipRouterBuilder
 import io.libp2p.security.noise.NoiseXXSecureChannel
@@ -16,7 +17,6 @@ import java.util.concurrent.TimeUnit
 fun main(args: Array<String>) {
     val startTimeMillis = System.currentTimeMillis()
 
-    // Parse --params argument
     val paramsIndex = args.indexOf("--params")
     if (paramsIndex == -1 || paramsIndex + 1 >= args.size) {
         System.err.println("Usage: --params <params.json>")
@@ -24,33 +24,34 @@ fun main(args: Array<String>) {
     }
     val paramsFile = args[paramsIndex + 1]
 
-    // Read params
     val params = ExperimentParams.fromJsonFile(paramsFile)
 
-    // Get node ID from hostname
     val hostname = InetAddress.getLocalHost().hostName
     val nodeId = hostname.removePrefix("node").toInt()
     JsonLogger.logStderr("Node ID: $nodeId, Hostname: $hostname")
 
-    // Generate deterministic key
     val privKey = nodePrivKey(nodeId)
 
-    // Extract GossipSub params from script
     val gossipParams = extractGossipSubParams(params.script, nodeId) ?: GossipParams()
 
-    // Create GossipSub router with custom message ID function
+    val partialHandler = InteropPartialMessagesHandler()
+
     val tracer = MessageTracer()
     val routerBuilder = GossipRouterBuilder(
         params = gossipParams,
-        protocol = PubsubProtocol.Gossip_V_1_2,
+        protocol = PubsubProtocol.Gossip_V_1_3,
         messageFactory = ::customIdMessageFactory,
         messageValidator = NOP_ROUTER_VALIDATOR,
+        enabledGossipExtensions = listOf(GossipExtension.PARTIAL_MESSAGES),
+        partialMessagesHandler = partialHandler,
     )
     routerBuilder.gossipRouterEventListeners.add(tracer)
     val router = routerBuilder.build()
     val gossip = Gossip(router)
 
-    // Create host
+    partialHandler.gossip = gossip
+    partialHandler.router = router
+
     val libp2pHost = host {
         identity {
             factory = { privKey }
@@ -77,15 +78,12 @@ fun main(args: Array<String>) {
     libp2pHost.start().get(30, TimeUnit.SECONDS)
     JsonLogger.logStderr("Host started, PeerId: ${libp2pHost.peerId}")
 
-    // Log PeerID to stdout (required by analysis)
     JsonLogger.logStdout("PeerID",
         "id" to libp2pHost.peerId.toBase58(),
         "node_id" to nodeId,
     )
 
-    // Run the experiment
-    runExperiment(startTimeMillis, libp2pHost, gossip, nodeId, params)
+    runExperiment(startTimeMillis, libp2pHost, gossip, router, partialHandler, nodeId, params)
 
-    // Exit explicitly since Netty's non-daemon threads would keep the JVM alive
     System.exit(0)
 }

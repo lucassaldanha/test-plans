@@ -10,6 +10,8 @@ import io.libp2p.core.pubsub.Validator
 import io.libp2p.core.pubsub.RESULT_VALID
 import io.libp2p.etc.types.toByteBuf
 import io.libp2p.pubsub.PubsubMessage
+import io.libp2p.pubsub.gossip.Gossip
+import io.libp2p.pubsub.gossip.GossipRouter
 import io.libp2p.pubsub.gossip.GossipRouterEventListener
 import java.net.InetAddress
 import java.nio.ByteBuffer
@@ -55,7 +57,9 @@ class MessageTracer : GossipRouterEventListener {
 class ScriptedNode(
     private val startTimeMillis: Long,
     private val host: Host,
-    private val gossip: PubsubApi,
+    private val gossip: Gossip,
+    private val router: GossipRouter,
+    private val partialHandler: InteropPartialMessagesHandler,
     private val nodeId: Int,
 ) {
     private val topicValidationDelays = mutableMapOf<String, Duration>()
@@ -63,7 +67,6 @@ class ScriptedNode(
     fun runInstruction(instruction: ScriptInstruction) {
         when (instruction) {
             is InitGossipSub -> {
-                // Already handled before node creation
                 JsonLogger.logStderr("InitGossipSub instruction already processed")
             }
             is Connect -> {
@@ -109,12 +112,27 @@ class ScriptedNode(
                         RESULT_VALID
                     }
                 }
+                if (instruction.partial) {
+                    router.setTopicPartialFlags(instruction.topicID, requestsPartial = true, supportsSendingPartial = true)
+                }
                 gossip.subscribe(validator, topic)
-                JsonLogger.logStderr("Subscribed to topic ${instruction.topicID}")
+                JsonLogger.logStderr("Subscribed to topic ${instruction.topicID} (partial=${instruction.partial})")
             }
             is SetTopicValidationDelay -> {
                 val delay = Duration.ofNanos((instruction.delaySeconds * 1_000_000_000).toLong())
                 topicValidationDelays[instruction.topicID] = delay
+            }
+            is AddPartialMessage -> {
+                val groupId = partialHandler.groupIdToBytes(instruction.groupID)
+                partialHandler.addParts(instruction.topicID, groupId, instruction.parts)
+                JsonLogger.logStderr("Added partial message for topic=${instruction.topicID} groupID=${instruction.groupID} parts=${instruction.parts}")
+            }
+            is PublishPartial -> {
+                val groupId = partialHandler.groupIdToBytes(instruction.groupID)
+                val actionsFn = partialHandler.buildPublishActionsFn(instruction.topicID, groupId)
+                JsonLogger.logStderr("Publishing partial message for topic=${instruction.topicID} groupID=${instruction.groupID}")
+                gossip.publishPartial(instruction.topicID, groupId, actionsFn).get(30, TimeUnit.SECONDS)
+                JsonLogger.logStderr("Published partial message for topic=${instruction.topicID} groupID=${instruction.groupID}")
             }
         }
     }
@@ -136,11 +154,13 @@ class ScriptedNode(
 fun runExperiment(
     startTimeMillis: Long,
     host: Host,
-    gossip: PubsubApi,
+    gossip: Gossip,
+    router: GossipRouter,
+    partialHandler: InteropPartialMessagesHandler,
     nodeId: Int,
     params: ExperimentParams,
 ) {
-    val node = ScriptedNode(startTimeMillis, host, gossip, nodeId)
+    val node = ScriptedNode(startTimeMillis, host, gossip, router, partialHandler, nodeId)
     for (instruction in params.script) {
         node.runInstruction(instruction)
     }

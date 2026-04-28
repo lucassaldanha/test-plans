@@ -23,6 +23,8 @@ import java.time.Duration
     JsonSubTypes.Type(value = SubscribeToTopic::class, name = "subscribeToTopic"),
     JsonSubTypes.Type(value = SetTopicValidationDelay::class, name = "setTopicValidationDelay"),
     JsonSubTypes.Type(value = InitGossipSub::class, name = "initGossipSub"),
+    JsonSubTypes.Type(value = AddPartialMessage::class, name = "addPartialMessage"),
+    JsonSubTypes.Type(value = PublishPartial::class, name = "publishPartial"),
 )
 sealed interface ScriptInstruction
 
@@ -33,6 +35,8 @@ data class Publish(val messageID: Int, val messageSizeBytes: Int, val topicID: S
 data class SubscribeToTopic(val topicID: String, val partial: Boolean = false) : ScriptInstruction
 data class SetTopicValidationDelay(val topicID: String, val delaySeconds: Double) : ScriptInstruction
 data class InitGossipSub(val gossipSubParams: GossipSubParamsJson) : ScriptInstruction
+data class AddPartialMessage(val topicID: String, val groupID: Long, val parts: Int) : ScriptInstruction
+data class PublishPartial(val topicID: String, val groupID: Long, val publishToNodeIDs: List<Int>? = null) : ScriptInstruction
 
 data class GossipSubParamsJson(
     val D: Int? = null,

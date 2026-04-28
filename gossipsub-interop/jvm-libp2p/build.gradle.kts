@@ -4,6 +4,7 @@ plugins {
 }
 
 repositories {
+    mavenLocal()
     mavenCentral()
     maven { url = uri("https://dl.cloudsmith.io/public/libp2p/jvm-libp2p/maven/") }
     maven { url = uri("https://jitpack.io") }
@@ -11,7 +12,7 @@ repositories {
 }
 
 dependencies {
-    implementation("io.libp2p:jvm-libp2p:1.2.2-RELEASE")
+    implementation("io.libp2p:jvm-libp2p:develop")
     implementation("com.fasterxml.jackson.module:jackson-module-kotlin:2.15.3")
 
     testImplementation(kotlin("test"))
